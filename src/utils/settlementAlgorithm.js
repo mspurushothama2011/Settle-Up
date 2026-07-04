@@ -116,13 +116,17 @@ export function calculateBilateralBalances(expenses, currentUserStrId) {
       if (exp.approved === false) return;
 
       // Direct settlement payment
+      // bilateralBalances[friendId] > 0 means friend owes ME
+      // bilateralBalances[friendId] < 0 means I owe the friend
       const recipientId = splitAmongst[0];
       if (paidBy === currentUserStrId) {
-        // I paid the friend
-        bilateralBalances[recipientId] = (bilateralBalances[recipientId] || 0) - amount;
+        // I paid the friend (recipientId) — clearing MY debt to them.
+        // I owe them less, so their bilateral balance increases (less negative toward zero).
+        bilateralBalances[recipientId] = (bilateralBalances[recipientId] || 0) + amount;
       } else if (recipientId === currentUserStrId) {
-        // The friend paid me
-        bilateralBalances[paidBy] = (bilateralBalances[paidBy] || 0) + amount;
+        // The friend (paidBy) paid me — clearing THEIR debt to me.
+        // They owe me less, so their bilateral balance decreases (less positive toward zero).
+        bilateralBalances[paidBy] = (bilateralBalances[paidBy] || 0) - amount;
       }
     } else {
       // Regular group split expense
