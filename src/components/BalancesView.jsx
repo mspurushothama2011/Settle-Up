@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getSupabaseClient } from '../supabaseClient';
 import { calculateSettlements } from '../utils/settlementAlgorithm';
 import { RefreshCw, AlertCircle, ArrowUpRight, ArrowDownLeft, Landmark, ShieldCheck, History, X, Check } from 'lucide-react';
@@ -10,6 +10,9 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
   const [actionLoadingId, setActionLoadingId] = useState(null);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+
+  // Lock to prevent double-clicks and multiple concurrent submissions
+  const submittingKeysRef = useRef(new Set());
 
   // Settle form inputs
   const [activeSettleKey, setActiveSettleKey] = useState(null); // stores 'debtorId-creditorId' of active custom settle form
@@ -54,6 +57,14 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
     setError('');
     setSuccessMsg('');
 
+    const actionKey = `${debtorId}-${creditorId}`;
+    
+    // Prevent double clicks (only allow running once per action key)
+    if (submittingKeysRef.current.has(actionKey)) {
+      console.warn('Submission already in progress for this settlement. Blocking duplicate click.');
+      return;
+    }
+
     const numericAmount = parseFloat(amount);
     if (isNaN(numericAmount) || numericAmount <= 0) {
       setError('Please enter a valid amount greater than 0.');
@@ -65,7 +76,7 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
       return;
     }
     
-    const actionKey = `${debtorId}-${creditorId}`;
+    submittingKeysRef.current.add(actionKey);
     setActionLoadingId(actionKey);
     const supabase = getSupabaseClient();
 
@@ -112,6 +123,7 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
       setError(errMsg);
     } finally {
       setActionLoadingId(null);
+      submittingKeysRef.current.delete(actionKey);
     }
   };
 
@@ -220,7 +232,7 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
       )}
 
       {successMsg && (
-        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-250 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold">
+        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-250 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-450 rounded-lg text-xs font-semibold">
           {successMsg}
         </div>
       )}
@@ -242,7 +254,7 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
         </div>
 
         {loading ? (
-          <div className="py-12 text-center text-xs text-slate-400 dark:text-slate-550">Recalculating balances...</div>
+          <div className="py-12 text-center text-xs text-slate-400 dark:text-slate-555">Recalculating balances...</div>
         ) : myActiveSettlements.length === 0 ? (
           <div className="py-12 text-center text-xs text-slate-455 dark:text-slate-500 border border-dashed border-slate-200 dark:border-slate-850 rounded-xl font-semibold">
             🎉 You are fully settled up! No outstanding balances.
@@ -252,7 +264,7 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
             {myActiveSettlements.map((settlement, idx) => {
               const iOwe = settlement.from.id === currentUser.id;
               const otherParty = iOwe ? settlement.to : settlement.from;
-              const absAmount = settlement.amount.toFixed(2);
+              const absAmount = Math.round(settlement.amount);
 
               return (
                 <div
@@ -276,7 +288,7 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
                       {!iOwe ? <ArrowUpRight className="w-4.5 h-4.5" /> : <ArrowDownLeft className="w-4.5 h-4.5" />}
                       ₹{absAmount}
                     </p>
-                    <p className="text-[10px] font-bold text-slate-400 dark:text-slate-550 uppercase mt-1">
+                    <p className="text-[10px] font-bold text-slate-400 dark:text-slate-555 uppercase mt-1">
                       {!iOwe ? 'owes you' : 'you owe'}
                     </p>
                   </div>
@@ -289,9 +301,9 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
 
       {/* 2. Settlement Approvals Section */}
       {(pendingIncoming.length > 0 || pendingOutgoing.length > 0) && (
-        <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors duration-150">
+        <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors duration-155">
           <h2 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-4 flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-slate-550 dark:text-slate-455" />
+            <ShieldCheck className="w-4 h-4 text-slate-555 dark:text-slate-455" />
             Pending Approvals ({pendingIncoming.length + pendingOutgoing.length})
           </h2>
 
@@ -309,7 +321,7 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
                       Awaiting Your Confirmation
                     </p>
                     <p className="text-xs text-slate-700 dark:text-slate-300 mt-1 leading-relaxed">
-                      <span className="font-semibold text-slate-900 dark:text-white">{senderName}</span> claims they paid you <span className="font-bold text-slate-900 dark:text-white font-mono">₹{parseFloat(payment.amount).toFixed(2)}</span>.
+                      <span className="font-semibold text-slate-900 dark:text-white">{senderName}</span> claims they paid you <span className="font-bold text-slate-900 dark:text-white font-mono">₹{Math.round(parseFloat(payment.amount))}</span>.
                     </p>
                   </div>
                   <div className="flex gap-2 flex-shrink-0">
@@ -321,7 +333,7 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
                     </button>
                     <button
                       onClick={() => handleDeclinePayment(payment.id)}
-                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold uppercase transition-colors"
+                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-205 dark:bg-slate-850 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold uppercase transition-colors"
                     >
                       Decline
                     </button>
@@ -339,7 +351,7 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
                   className="p-4 bg-slate-50/40 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-850 rounded-xl flex items-center justify-between opacity-80 animate-fadeIn"
                 >
                   <p className="text-xs text-slate-650 dark:text-slate-400">
-                    You recorded a payment of <span className="font-bold font-mono text-slate-900 dark:text-white">₹{parseFloat(payment.amount).toFixed(2)}</span> to <span className="font-semibold">{recipientName}</span> (Awaiting recipient confirmation).
+                    You recorded a payment of <span className="font-bold font-mono text-slate-900 dark:text-white">₹{Math.round(parseFloat(payment.amount))}</span> to <span className="font-semibold">{recipientName}</span> (Awaiting recipient confirmation).
                   </p>
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex-shrink-0 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
                     Awaiting Approval
@@ -375,15 +387,19 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
                 const actionKey = `${settlement.from.id}-${settlement.to.id}`;
                 const isFormActive = activeSettleKey === actionKey;
 
-                // Validate custom amount entered
+                // Check lock state
+                const isSubmitting = submittingKeysRef.current.has(actionKey) || actionLoadingId === actionKey;
+
+                // Validate custom amount entered (decimals allowed in float, bounds checked)
                 const enteredVal = parseFloat(customAmount) || 0;
                 const isAmountInvalid = enteredVal <= 0 || enteredVal > settlement.amount + 0.01;
+                const roundedLimit = Math.round(settlement.amount);
 
                 return (
                   <div
                     key={idx}
-                    className={`p-4 border rounded-xl bg-white dark:bg-slate-900/50 transition-colors duration-150 ${
-                      isFormActive ? 'border-slate-400 dark:border-slate-650 bg-slate-50/20 dark:bg-slate-900/30' : 'border-slate-200 dark:border-slate-850'
+                    className={`p-4 border rounded-xl bg-white dark:bg-slate-900/50 transition-colors duration-155 ${
+                      isFormActive ? 'border-slate-400 dark:border-slate-655 bg-slate-50/20 dark:bg-slate-900/30' : 'border-slate-200 dark:border-slate-850'
                     }`}
                   >
                     <div className="flex items-center justify-between">
@@ -399,19 +415,20 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
                             </>
                           )}
                         </p>
-                        <p className="text-xs text-slate-450 dark:text-slate-500 mt-1 font-mono">
+                        <p className="text-xs text-slate-455 dark:text-slate-500 mt-1 font-mono">
                           {otherParty.phone}
                         </p>
                       </div>
 
                       <div className="flex items-center gap-4">
                         <span className="text-sm font-extrabold font-mono text-slate-900 dark:text-white">
-                          ₹{settlement.amount.toFixed(2)}
+                          ₹{roundedLimit}
                         </span>
                         
                         {!isFormActive ? (
                           <button
                             onClick={() => startCustomSettle(actionKey, settlement.amount)}
+                            disabled={isSubmitting}
                             className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase shadow-sm transition-colors ${
                               iOwe
                                 ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100'
@@ -435,7 +452,7 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
                     {isFormActive && (
                       <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fadeIn">
                         <div className="flex-1">
-                          <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-450 uppercase mb-1">
+                          <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-455 uppercase mb-1">
                             Settle Amount (₹)
                           </label>
                           <div className="relative max-w-[150px]">
@@ -448,10 +465,11 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
                               max={settlement.amount}
                               value={customAmount}
                               onChange={(e) => setCustomAmount(e.target.value)}
+                              disabled={isSubmitting}
                               className={`w-full pl-6 pr-2 py-1 border rounded-lg text-xs font-mono font-semibold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none transition-colors ${
                                 isAmountInvalid 
-                                  ? 'border-rose-400 focus:border-rose-500' 
-                                  : 'border-slate-200 dark:border-slate-750 focus:border-slate-900 dark:focus:border-white'
+                                  ? 'border-rose-450 focus:border-rose-500' 
+                                  : 'border-slate-205 dark:border-slate-750 focus:border-slate-900 dark:focus:border-white'
                               }`}
                             />
                           </div>
@@ -464,10 +482,10 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
 
                         <button
                           onClick={() => handleSettleDebt(settlement.from.id, settlement.to.id, customAmount, settlement.amount)}
-                          disabled={actionLoadingId === actionKey || isAmountInvalid}
-                          className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-300 dark:disabled:bg-slate-800 text-white disabled:text-slate-450 rounded-lg text-xs font-bold uppercase transition-colors shadow-sm flex items-center justify-center gap-1 self-end sm:self-center"
+                          disabled={isSubmitting || isAmountInvalid}
+                          className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-200 dark:disabled:bg-slate-800 text-white disabled:text-slate-400 rounded-lg text-xs font-bold uppercase transition-colors shadow-sm flex items-center justify-center gap-1 self-end sm:self-center"
                         >
-                          {actionLoadingId === actionKey ? (
+                          {isSubmitting ? (
                             <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                           ) : (
                             <>
@@ -488,7 +506,7 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
         {/* Settled History (Completed Payments) */}
         <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-850 shadow-sm transition-colors duration-150">
           <h2 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-6 flex items-center gap-2">
-            <History className="w-4 h-4 text-slate-550 dark:text-slate-400" />
+            <History className="w-4 h-4 text-slate-555 dark:text-slate-400" />
             Settled History ({settledHistory.length})
           </h2>
 
@@ -514,7 +532,7 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
                   >
                     <div className="min-w-0 pr-3">
                       <div className="flex items-center gap-2">
-                        <span className="text-[9px] font-bold uppercase bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 px-1.5 py-0.5 rounded-full flex items-center gap-1">
+                        <span className="text-[9px] font-bold uppercase bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-450 px-1.5 py-0.5 rounded-full flex items-center gap-1">
                           <ShieldCheck className="w-3.5 h-3.5" />
                           Settled Payment
                         </span>
@@ -533,7 +551,7 @@ export default function BalancesView({ currentUser, refreshTrigger, onSettlement
 
                     <div className="text-right">
                       <p className="text-xs font-bold text-slate-500 dark:text-slate-400 font-mono">
-                        ₹{parseFloat(payment.amount).toFixed(2)}
+                        ₹{Math.round(parseFloat(payment.amount))}
                       </p>
                     </div>
                   </div>

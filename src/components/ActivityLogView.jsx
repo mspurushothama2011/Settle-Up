@@ -261,7 +261,7 @@ export default function ActivityLogView({ currentUser, refreshTrigger }) {
                     <div className="flex items-center gap-3">
                       <div className="text-right">
                         <p className="text-sm font-extrabold text-slate-900 dark:text-white font-mono">
-                          ₹{parseFloat(exp.amount).toFixed(2)}
+                          ₹{Math.round(parseFloat(exp.amount))}
                         </p>
                       </div>
                       {isExpanded ? (
@@ -311,7 +311,7 @@ export default function ActivityLogView({ currentUser, refreshTrigger }) {
                       
                       <div className="space-y-2 border-l-2 border-slate-200 dark:border-slate-800 pl-3">
                         <div className="text-xs text-slate-700 dark:text-slate-350">
-                          💰 <span className="font-semibold text-slate-900 dark:text-white">{payerName}</span> paid a total of <strong>₹{parseFloat(exp.amount).toFixed(2)}</strong>.
+                          💰 <span className="font-semibold text-slate-900 dark:text-white">{payerName}</span> paid a total of <strong>₹{Math.round(parseFloat(exp.amount))}</strong>.
                         </div>
 
                         {exp.is_payment ? (
@@ -321,7 +321,7 @@ export default function ActivityLogView({ currentUser, refreshTrigger }) {
                         ) : (
                           <div className="space-y-1.5 mt-2">
                             <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">
-                              Shares for each participant (₹{shareAmount.toFixed(2)} each):
+                              Shares for each participant (₹{Math.round(shareAmount)} each):
                             </p>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
                               {exp.split_amongst.map((participantId) => {
@@ -350,7 +350,7 @@ export default function ActivityLogView({ currentUser, refreshTrigger }) {
                                           owes
                                         </span>
                                       )}
-                                      ₹{shareAmount.toFixed(2)}
+                                      ₹{Math.round(shareAmount)}
                                     </span>
                                   </div>
                                 );

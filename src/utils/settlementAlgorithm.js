@@ -63,8 +63,8 @@ export function calculateSettlements(expenses, profiles) {
     }
   });
 
-  // Sort: Debtors ascending (largest debt first, e.g. -500 is before -100)
-  // Creditors descending (largest credit first, e.g. 500 is before 100)
+  // Sort: Debtors ascending (largest debt first)
+  // Creditors descending (largest credit first)
   debtors.sort((a, b) => a.balance - b.balance);
   creditors.sort((a, b) => b.balance - a.balance);
 
@@ -146,7 +146,7 @@ export function calculateBilateralBalances(expenses, currentUserStrId) {
     }
   });
 
-  // Round values
+  // Round values to 2 decimal places internally to preserve exact cents/paisa
   Object.keys(bilateralBalances).forEach(id => {
     bilateralBalances[id] = parseFloat(bilateralBalances[id].toFixed(2));
   });
