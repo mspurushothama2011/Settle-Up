@@ -172,54 +172,55 @@ export default function App() {
       </header>
 
       {/* Main Layout Area */}
-      <main className="max-w-6xl w-full mx-auto px-6 py-8 flex-1 flex flex-col">
+      <main className="max-w-6xl w-full mx-auto px-6 py-8 pb-24 sm:pb-8 flex-1 flex flex-col">
         
         {/* Navigation Tabs */}
-        <div className="flex justify-center mb-8">
-          <nav className="inline-flex p-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm">
+        {/* Mobile: fixed bottom bar, Desktop: standard centered top bar */}
+        <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-t border-slate-200 dark:border-slate-800 shadow-lg px-4 py-1.5 sm:relative sm:bottom-auto sm:left-auto sm:right-auto sm:z-auto sm:bg-transparent sm:dark:bg-transparent sm:border-0 sm:shadow-none sm:p-0 sm:mb-8 sm:flex sm:justify-center transition-all duration-150">
+          <nav className="flex justify-around items-center w-full sm:inline-flex sm:w-auto sm:p-1 sm:bg-white sm:dark:bg-slate-900 sm:border sm:border-slate-200 sm:dark:border-slate-800 sm:rounded-xl sm:shadow-sm">
             <button
               onClick={() => setActiveTab('balances')}
-              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase rounded-lg transition-all ${
+              className={`flex flex-col sm:flex-row items-center gap-1 sm:gap-2 px-3 py-1 sm:px-4 sm:py-2 text-[10px] sm:text-xs font-bold uppercase rounded-lg transition-all flex-1 sm:flex-none ${
                 activeTab === 'balances'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                  ? 'text-slate-950 dark:text-white sm:bg-slate-900 sm:dark:bg-white sm:text-white sm:dark:text-slate-900 sm:shadow-sm'
+                  : 'text-slate-400 dark:text-slate-500 hover:text-slate-950 dark:hover:text-white'
               }`}
             >
-              <Wallet className="w-4 h-4" />
-              Balances
+              <Wallet className="w-4.5 h-4.5 sm:w-4 sm:h-4" />
+              <span>Balances</span>
             </button>
             <button
               onClick={() => setActiveTab('activity')}
-              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase rounded-lg transition-all ${
+              className={`flex flex-col sm:flex-row items-center gap-1 sm:gap-2 px-3 py-1 sm:px-4 sm:py-2 text-[10px] sm:text-xs font-bold uppercase rounded-lg transition-all flex-1 sm:flex-none ${
                 activeTab === 'activity'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                  ? 'text-slate-950 dark:text-white sm:bg-slate-900 sm:dark:bg-white sm:text-white sm:dark:text-slate-900 sm:shadow-sm'
+                  : 'text-slate-400 dark:text-slate-500 hover:text-slate-955 dark:hover:text-white'
               }`}
             >
-              <History className="w-4 h-4" />
-              Activity Log
+              <History className="w-4.5 h-4.5 sm:w-4 sm:h-4" />
+              <span>Activity</span>
             </button>
             <button
               onClick={() => setActiveTab('add-expense')}
-              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase rounded-lg transition-all ${
+              className={`flex flex-col sm:flex-row items-center gap-1 sm:gap-2 px-3 py-1 sm:px-4 sm:py-2 text-[10px] sm:text-xs font-bold uppercase rounded-lg transition-all flex-1 sm:flex-none ${
                 activeTab === 'add-expense'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                  ? 'text-slate-950 dark:text-white sm:bg-slate-900 sm:dark:bg-white sm:text-white sm:dark:text-slate-900 sm:shadow-sm'
+                  : 'text-slate-400 dark:text-slate-500 hover:text-slate-950 dark:hover:text-white'
               }`}
             >
-              <PlusCircle className="w-4 h-4" />
-              Add Expense
+              <PlusCircle className="w-4.5 h-4.5 sm:w-4 sm:h-4" />
+              <span>Add Expense</span>
             </button>
             <button
               onClick={() => setActiveTab('friends')}
-              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase rounded-lg transition-all ${
+              className={`flex flex-col sm:flex-row items-center gap-1 sm:gap-2 px-3 py-1 sm:px-4 sm:py-2 text-[10px] sm:text-xs font-bold uppercase rounded-lg transition-all flex-1 sm:flex-none ${
                 activeTab === 'friends'
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                  ? 'text-slate-950 dark:text-white sm:bg-slate-900 sm:dark:bg-white sm:text-white sm:dark:text-slate-900 sm:shadow-sm'
+                  : 'text-slate-400 dark:text-slate-500 hover:text-slate-955 dark:hover:text-white'
               }`}
             >
-              <Users className="w-4 h-4" />
-              Members
+              <Users className="w-4.5 h-4.5 sm:w-4 sm:h-4" />
+              <span>Members</span>
             </button>
           </nav>
         </div>
