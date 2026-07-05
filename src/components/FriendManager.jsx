@@ -1,62 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getSupabaseClient } from '../supabaseClient';
+import { buildDirectDebts } from '../utils/settlementAlgorithm';
 import { UserPlus, User, Phone, RefreshCw, AlertCircle, Receipt, Wallet, ChevronDown, ChevronUp } from 'lucide-react';
-
-// ---------- Pure calculation: who owes whom, directly from expenses ----------
-function buildDirectDebts(expenses, profiles) {
-  // directDebts[creditorId][debtorId] = amount owed (before any settlements)
-  const directDebts = {};
-  const totalPaid = {};   // how much each person paid in total
-  const settled = {};     // settled[creditorId][debtorId] = total paid back (approved payments)
-
-  profiles.forEach(p => {
-    directDebts[p.id] = {};
-    settled[p.id] = {};
-    totalPaid[p.id] = 0;
-  });
-
-  expenses.forEach(exp => {
-    const amount = parseFloat(exp.amount || 0);
-    const paidBy = exp.paid_by;
-    const splitAmongst = exp.split_amongst || [];
-
-    if (splitAmongst.length === 0) return;
-
-    if (exp.is_payment) {
-      // Approved settlement: debtor (paidBy) paying creditor (splitAmongst[0])
-      if (exp.approved === false) return;
-      const creditorId = splitAmongst[0];
-      if (!settled[creditorId]) settled[creditorId] = {};
-      settled[creditorId][paidBy] = (settled[creditorId][paidBy] || 0) + amount;
-    } else {
-      // Regular expense: paidBy covered the bill
-      totalPaid[paidBy] = (totalPaid[paidBy] || 0) + amount;
-      const share = amount / splitAmongst.length;
-
-      splitAmongst.forEach(participantId => {
-        if (participantId === paidBy) return; // payer owes themselves nothing
-        if (!directDebts[paidBy]) directDebts[paidBy] = {};
-        directDebts[paidBy][participantId] = (directDebts[paidBy][participantId] || 0) + share;
-      });
-    }
-  });
-
-  // Subtract settlements from direct debts to get remaining balances
-  const remaining = {};
-  profiles.forEach(p => { remaining[p.id] = {}; });
-
-  Object.entries(directDebts).forEach(([creditorId, debtors]) => {
-    Object.entries(debtors).forEach(([debtorId, rawDebt]) => {
-      const paid = (settled[creditorId] || {})[debtorId] || 0;
-      const net = parseFloat((rawDebt - paid).toFixed(2));
-      if (net > 0.01) {
-        remaining[creditorId][debtorId] = net;
-      }
-    });
-  });
-
-  return { remaining, totalPaid };
-}
 
 // ---------- Component ----------
 export default function FriendManager({ currentUser, refreshTrigger }) {

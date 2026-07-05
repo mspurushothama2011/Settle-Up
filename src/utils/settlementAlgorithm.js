@@ -157,3 +157,58 @@ export function calculateBilateralBalances(expenses, currentUserStrId) {
 
   return bilateralBalances;
 }
+
+/**
+ * Builds a simple direct-debt table from raw expenses.
+ * Returns:
+ *   remaining[creditorId][debtorId] = amount still owed (after approved settlements)
+ *   totalPaid[personId]             = total rupees that person paid out of pocket
+ */
+export function buildDirectDebts(expenses, profiles) {
+  const directDebts = {};  // [creditorId][debtorId] = raw debt
+  const settled = {};      // [creditorId][debtorId] = total repaid (approved payments)
+  const totalPaid = {};
+
+  profiles.forEach(p => {
+    directDebts[p.id] = {};
+    settled[p.id] = {};
+    totalPaid[p.id] = 0;
+  });
+
+  expenses.forEach(exp => {
+    const amount = parseFloat(exp.amount || 0);
+    const paidBy = exp.paid_by;
+    const splitAmongst = exp.split_amongst || [];
+    if (splitAmongst.length === 0) return;
+
+    if (exp.is_payment) {
+      if (exp.approved === false) return;
+      // paidBy is the debtor paying creditorId
+      const creditorId = splitAmongst[0];
+      if (!settled[creditorId]) settled[creditorId] = {};
+      settled[creditorId][paidBy] = (settled[creditorId][paidBy] || 0) + amount;
+    } else {
+      if (totalPaid[paidBy] !== undefined) totalPaid[paidBy] += amount;
+      const share = amount / splitAmongst.length;
+      splitAmongst.forEach(participantId => {
+        if (participantId === paidBy) return;
+        if (!directDebts[paidBy]) directDebts[paidBy] = {};
+        directDebts[paidBy][participantId] = (directDebts[paidBy][participantId] || 0) + share;
+      });
+    }
+  });
+
+  // Subtract settlements to get remaining balances
+  const remaining = {};
+  profiles.forEach(p => { remaining[p.id] = {}; });
+
+  Object.entries(directDebts).forEach(([creditorId, debtors]) => {
+    Object.entries(debtors).forEach(([debtorId, rawDebt]) => {
+      const paid = (settled[creditorId] || {})[debtorId] || 0;
+      const net = parseFloat((rawDebt - paid).toFixed(2));
+      if (net > 0.01) remaining[creditorId][debtorId] = net;
+    });
+  });
+
+  return { remaining, totalPaid };
+}
