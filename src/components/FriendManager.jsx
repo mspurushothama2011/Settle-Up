@@ -1,10 +1,66 @@
 import React, { useState, useEffect } from 'react';
 import { getSupabaseClient } from '../supabaseClient';
-import { calculateBilateralBalances } from '../utils/settlementAlgorithm';
-import { UserPlus, User, Phone, RefreshCw, AlertCircle, Sparkles, ArrowUpRight, ArrowDownLeft, Check, Receipt } from 'lucide-react';
+import { UserPlus, User, Phone, RefreshCw, AlertCircle, Receipt, Wallet, ChevronDown, ChevronUp } from 'lucide-react';
 
+// ---------- Pure calculation: who owes whom, directly from expenses ----------
+function buildDirectDebts(expenses, profiles) {
+  // directDebts[creditorId][debtorId] = amount owed (before any settlements)
+  const directDebts = {};
+  const totalPaid = {};   // how much each person paid in total
+  const settled = {};     // settled[creditorId][debtorId] = total paid back (approved payments)
+
+  profiles.forEach(p => {
+    directDebts[p.id] = {};
+    settled[p.id] = {};
+    totalPaid[p.id] = 0;
+  });
+
+  expenses.forEach(exp => {
+    const amount = parseFloat(exp.amount || 0);
+    const paidBy = exp.paid_by;
+    const splitAmongst = exp.split_amongst || [];
+
+    if (splitAmongst.length === 0) return;
+
+    if (exp.is_payment) {
+      // Approved settlement: debtor (paidBy) paying creditor (splitAmongst[0])
+      if (exp.approved === false) return;
+      const creditorId = splitAmongst[0];
+      if (!settled[creditorId]) settled[creditorId] = {};
+      settled[creditorId][paidBy] = (settled[creditorId][paidBy] || 0) + amount;
+    } else {
+      // Regular expense: paidBy covered the bill
+      totalPaid[paidBy] = (totalPaid[paidBy] || 0) + amount;
+      const share = amount / splitAmongst.length;
+
+      splitAmongst.forEach(participantId => {
+        if (participantId === paidBy) return; // payer owes themselves nothing
+        if (!directDebts[paidBy]) directDebts[paidBy] = {};
+        directDebts[paidBy][participantId] = (directDebts[paidBy][participantId] || 0) + share;
+      });
+    }
+  });
+
+  // Subtract settlements from direct debts to get remaining balances
+  const remaining = {};
+  profiles.forEach(p => { remaining[p.id] = {}; });
+
+  Object.entries(directDebts).forEach(([creditorId, debtors]) => {
+    Object.entries(debtors).forEach(([debtorId, rawDebt]) => {
+      const paid = (settled[creditorId] || {})[debtorId] || 0;
+      const net = parseFloat((rawDebt - paid).toFixed(2));
+      if (net > 0.01) {
+        remaining[creditorId][debtorId] = net;
+      }
+    });
+  });
+
+  return { remaining, totalPaid };
+}
+
+// ---------- Component ----------
 export default function FriendManager({ currentUser, refreshTrigger }) {
-  const [friends, setFriends] = useState([]);
+  const [profiles, setProfiles] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -12,77 +68,46 @@ export default function FriendManager({ currentUser, refreshTrigger }) {
   const [fetching, setFetching] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
 
   const fetchData = async () => {
     setFetching(true);
     setError('');
     const supabase = getSupabaseClient();
     if (!supabase) return;
-
     try {
-      // 1. Fetch all profiles
       const { data: profileData, error: profileErr } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('name', { ascending: true });
-
+        .from('profiles').select('*').order('name', { ascending: true });
       if (profileErr) throw profileErr;
-      setFriends(profileData || []);
+      setProfiles(profileData || []);
 
-      // 2. Fetch all expenses
       const { data: expenseData, error: expenseErr } = await supabase
-        .from('expenses')
-        .select('*');
-
+        .from('expenses').select('*');
       if (expenseErr) throw expenseErr;
       setExpenses(expenseData || []);
     } catch (err) {
-      console.error('Error fetching members directory:', err);
-      setError('Failed to fetch directory data.');
+      setError('Failed to load data.');
     } finally {
       setFetching(false);
     }
   };
 
-  useEffect(() => {
-    fetchData();
-  }, [currentUser, refreshTrigger]);
+  useEffect(() => { fetchData(); }, [currentUser, refreshTrigger]);
 
   const handleAddFriend = async (e) => {
     e.preventDefault();
     if (!name.trim() || !phone.trim()) return;
-
-    setLoading(true);
-    setError('');
-    setSuccess(false);
+    setLoading(true); setError(''); setSuccess(false);
     const supabase = getSupabaseClient();
-
     try {
-      const { data: existing, error: checkError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('phone', phone.trim())
-        .maybeSingle();
-
-      if (checkError) throw checkError;
-
+      const { data: existing } = await supabase
+        .from('profiles').select('*').eq('phone', phone.trim()).maybeSingle();
       if (existing) {
-        setError(`A user with phone number "${phone}" already exists (${existing.name}).`);
-        setLoading(false);
+        setError(`Phone already registered to ${existing.name}.`);
         return;
       }
-
-      const { data, error: insertError } = await supabase
-        .from('profiles')
-        .insert([{ name: name.trim(), phone: phone.trim() }])
-        .select()
-        .single();
-
-      if (insertError) throw insertError;
-
-      setSuccess(true);
-      setName('');
-      setPhone('');
+      await supabase.from('profiles').insert([{ name: name.trim(), phone: phone.trim() }]);
+      setSuccess(true); setName(''); setPhone('');
       fetchData();
     } catch (err) {
       setError(err.message || 'Failed to add friend.');
@@ -91,226 +116,208 @@ export default function FriendManager({ currentUser, refreshTrigger }) {
     }
   };
 
-  const getInitials = (fullName) => {
-    return fullName
-      .split(' ')
-      .map((n) => n[0])
-      .join('')
-      .toUpperCase()
-      .substring(0, 2);
-  };
+  const getInitials = (n) => n.split(' ').map(w => w[0]).join('').toUpperCase().substring(0, 2);
+  const getName = (id) => profiles.find(p => p.id === id)?.name || 'Unknown';
 
-  // Calculate bilateral standing balances for the active user
-  const bilateralBalances = calculateBilateralBalances(expenses, currentUser.id);
+  // Build the simple direct debt table
+  const { remaining, totalPaid } = buildDirectDebts(expenses, profiles);
 
-  // Calculate total money spent by the entire group (excluding settlement payments)
+  // Total group spend (excluding payments)
   const totalGroupSpent = expenses
-    .filter((exp) => !exp.is_payment)
-    .reduce((sum, exp) => sum + parseFloat(exp.amount || 0), 0);
-
-  // Calculate total money personally paid for by the active logged-in profile
-  const personalSpent = expenses
-    .filter((exp) => !exp.is_payment && exp.paid_by === currentUser.id)
-    .reduce((sum, exp) => sum + parseFloat(exp.amount || 0), 0);
+    .filter(e => !e.is_payment)
+    .reduce((s, e) => s + parseFloat(e.amount || 0), 0);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-slate-900 dark:text-slate-100 max-w-5xl mx-auto">
-      {/* Add Friend Form */}
-      <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm h-fit transition-colors duration-155">
+
+      {/* ── Add Friend Form ── */}
+      <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm h-fit">
         <h2 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-4 flex items-center gap-2">
-          <UserPlus className="w-4 h-4 text-slate-550 dark:text-slate-400" />
-          Add Friend to Ledger
+          <UserPlus className="w-4 h-4 text-slate-400" />
+          Add Member
         </h2>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 text-red-655 dark:text-red-400 rounded-lg text-xs flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-            <span>{error}</span>
+          <div className="mb-4 p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 rounded-lg text-xs flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" /><span>{error}</span>
           </div>
         )}
-
         {success && (
-          <div className="mb-4 p-3 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-250 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold">
-            Friend added successfully!
+          <div className="mb-4 p-3 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-semibold">
+            Member added!
           </div>
         )}
 
         <form onSubmit={handleAddFriend} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-550 dark:text-slate-400 uppercase tracking-wider mb-2">
-              Friend Name
-            </label>
+            <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Name</label>
             <div className="relative">
-              <User className="absolute left-3 top-2.5 w-4 h-4 text-slate-400 dark:text-slate-550" />
-              <input
-                type="text"
-                required
-                placeholder="e.g. Rahul Verma"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:border-slate-900 dark:focus:border-white focus:outline-none transition-all"
-              />
+              <User className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+              <input type="text" required placeholder="e.g. Rahul Verma" value={name}
+                onChange={e => setName(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:border-slate-900 dark:focus:border-white focus:outline-none transition-all" />
             </div>
           </div>
-
           <div>
-            <label className="block text-xs font-semibold text-slate-550 dark:text-slate-400 uppercase tracking-wider mb-2">
-              Phone Number
-            </label>
+            <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Phone</label>
             <div className="relative">
-              <Phone className="absolute left-3 top-2.5 w-4 h-4 text-slate-400 dark:text-slate-555" />
-              <input
-                type="tel"
-                required
-                placeholder="e.g. 9876543211"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:border-slate-900 dark:focus:border-white focus:outline-none transition-all"
-              />
+              <Phone className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+              <input type="tel" required placeholder="e.g. 9876543210" value={phone}
+                onChange={e => setPhone(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:border-slate-900 dark:focus:border-white focus:outline-none transition-all" />
             </div>
           </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2.5 bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 font-semibold text-sm rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm"
-          >
-            {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Register Friend'}
+          <button type="submit" disabled={loading}
+            className="w-full py-2.5 bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 font-semibold text-sm rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm">
+            {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Register Member'}
           </button>
         </form>
       </div>
 
-      {/* Friends List & Standings Dashboard */}
-      <div className="md:col-span-2 space-y-6">
-        
-        {/* Total Group Spending & Personal Spending Card */}
+      {/* ── Right Column ── */}
+      <div className="md:col-span-2 space-y-5">
+
+        {/* Total Group Spending Banner */}
         {!fetching && (
-          <div className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 p-6 rounded-xl border border-slate-800 dark:border-slate-200 shadow-sm flex items-center justify-between transition-colors duration-150 animate-fadeIn">
+          <div className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 p-5 rounded-xl shadow-sm flex items-center justify-between">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest opacity-85 dark:opacity-75">
-                Total Group Spending
+              <p className="text-[10px] font-bold uppercase tracking-widest opacity-70">Total Group Spending</p>
+              <p className="text-2xl font-extrabold mt-1 font-mono">
+                ₹{Math.round(totalGroupSpent).toLocaleString('en-IN')}
               </p>
-              <p className="text-2xl font-extrabold mt-1 font-mono tracking-tight">
-                ₹{totalGroupSpent.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </p>
-              
-              {/* Personal spending subtext */}
-              <p className="text-xs font-semibold mt-3.5 opacity-80 dark:opacity-90 flex items-center gap-1.5 border-t border-white/10 dark:border-slate-200/50 pt-2.5">
-                <span>👤</span>
-                <span>You personally paid:</span>
-                <span className="font-mono font-bold text-white dark:text-slate-950">
-                  ₹{personalSpent.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
+              <p className="text-xs mt-2 opacity-60 border-t border-white/10 dark:border-black/10 pt-2">
+                You personally paid: <span className="font-bold font-mono">₹{Math.round(totalPaid[currentUser.id] || 0).toLocaleString('en-IN')}</span>
               </p>
             </div>
-            <div className="p-3 bg-white/10 dark:bg-slate-200/50 rounded-lg">
-              <Receipt className="w-6 h-6 text-white dark:text-slate-900" />
+            <div className="p-3 bg-white/10 dark:bg-black/10 rounded-lg">
+              <Receipt className="w-6 h-6" />
             </div>
           </div>
         )}
 
-        {/* Directory List Box */}
-        <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors duration-150">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-slate-550 dark:text-slate-455" />
-              Group Directory & Standings ({friends.length})
-            </h2>
-            <button
-              onClick={fetchData}
-              disabled={fetching}
-              className="text-slate-455 hover:text-slate-655 dark:text-slate-500 dark:hover:text-slate-350 transition-colors"
-            >
-              <RefreshCw className={`w-4 h-4 ${fetching ? 'animate-spin' : ''}`} />
-            </button>
+        {/* Per-Person Spending Cards */}
+        {fetching ? (
+          <div className="py-12 text-center text-sm text-slate-400">Loading...</div>
+        ) : profiles.length === 0 ? (
+          <div className="py-12 text-center text-sm text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
+            No members yet. Add one using the form!
           </div>
+        ) : (
+          <div className="space-y-3">
+            {profiles.map(person => {
+              const paid = totalPaid[person.id] || 0;
+              const debtors = Object.entries(remaining[person.id] || {});
+              const totalOwed = debtors.reduce((s, [, v]) => s + v, 0);
+              const isExpanded = expandedId === person.id;
+              const isMe = person.id === currentUser.id;
 
-          {fetching ? (
-            <div className="text-center py-12 text-sm text-slate-400 dark:text-slate-550">
-              Loading group directory...
-            </div>
-          ) : friends.length === 0 ? (
-            <div className="text-center py-12 text-sm text-slate-400 dark:text-slate-550 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
-              No group members added yet. Add a friend using the form!
-            </div>
-          ) : (
-            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
-              {friends.map((friend) => {
-                const balance = bilateralBalances[friend.id] || 0;
+              return (
+                <div key={person.id}
+                  className={`rounded-xl border shadow-sm overflow-hidden transition-all ${
+                    isMe
+                      ? 'border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/30 dark:bg-indigo-950/10'
+                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50'
+                  }`}>
 
-                return (
-                  <div
-                    key={friend.id}
-                    className={`p-4 border rounded-xl flex items-center justify-between transition-all ${
-                      friend.id === currentUser.id
-                        ? 'border-indigo-200 bg-indigo-50/20 dark:border-indigo-950/60 dark:bg-indigo-950/10'
-                        : 'border-slate-200 dark:border-slate-800 hover:border-slate-350 dark:hover:border-slate-700 bg-white dark:bg-slate-900/50'
-                    }`}
-                  >
+                  {/* Header row – always visible */}
+                  <button
+                    onClick={() => setExpandedId(isExpanded ? null : person.id)}
+                    className="w-full p-4 flex items-center justify-between text-left hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+
                     <div className="flex items-center gap-3 min-w-0">
+                      {/* Avatar */}
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs shadow-sm flex-shrink-0 ${
-                        friend.id === currentUser.id
-                          ? 'bg-indigo-900 dark:bg-indigo-700 text-white'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200'
+                        isMe ? 'bg-indigo-800 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200'
                       }`}>
-                        {getInitials(friend.name)}
+                        {getInitials(person.name)}
                       </div>
+
                       <div className="min-w-0">
-                        <p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
-                          {friend.name}
-                          {friend.id === currentUser.id && (
-                            <span className="ml-1.5 px-1.5 py-0.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-[9px] font-bold rounded-full uppercase tracking-wider">
+                        <p className="text-sm font-bold text-slate-900 dark:text-white truncate flex items-center gap-2">
+                          {person.name}
+                          {isMe && (
+                            <span className="px-1.5 py-0.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-[9px] font-bold rounded-full uppercase">
                               You
                             </span>
                           )}
                         </p>
-                        <p className="text-xs text-slate-400 dark:text-slate-550 font-mono truncate mt-0.5">{friend.phone}</p>
+                        <p className="text-[11px] text-slate-400 font-mono mt-0.5">{person.phone}</p>
                       </div>
                     </div>
 
-                    {/* Standing status balance for other users */}
-                    {friend.id !== currentUser.id && (
-                      <div className="text-right flex-shrink-0 pl-3">
-                        {balance > 0.01 ? (
-                          <div className="flex flex-col items-end">
-                            <p className="text-xs font-bold text-emerald-700 dark:text-emerald-450 font-mono flex items-center gap-0.5">
-                              <ArrowUpRight className="w-3.5 h-3.5" />
-                              ₹{balance.toFixed(2)}
-                            </p>
-                            <p className="text-[9px] font-extrabold text-emerald-700/80 dark:text-emerald-500 uppercase tracking-wider mt-0.5">
-                              Owes You
-                            </p>
-                          </div>
-                        ) : balance < -0.01 ? (
-                          <div className="flex flex-col items-end">
-                            <p className="text-xs font-bold text-rose-650 dark:text-rose-455 font-mono flex items-center gap-0.5">
-                              <ArrowDownLeft className="w-3.5 h-3.5" />
-                              ₹{Math.abs(balance).toFixed(2)}
-                            </p>
-                            <p className="text-[9px] font-extrabold text-rose-650/80 dark:text-rose-500 uppercase tracking-wider mt-0.5">
-                              You Owe
-                            </p>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col items-end opacity-70">
-                            <p className="text-xs font-semibold text-slate-400 dark:text-slate-555 font-mono flex items-center gap-0.5">
-                              <Check className="w-3.5 h-3.5 text-slate-400" />
-                              ₹0.00
-                            </p>
-                            <p className="text-[9px] font-extrabold text-slate-400 dark:text-slate-550 uppercase tracking-wider mt-0.5">
-                              Settled
-                            </p>
-                          </div>
-                        )}
+                    <div className="flex items-center gap-4 flex-shrink-0 pl-3">
+                      {/* Spent badge */}
+                      <div className="text-right">
+                        <div className="flex items-center gap-1 text-xs font-bold text-slate-700 dark:text-slate-300">
+                          <Wallet className="w-3.5 h-3.5 text-slate-400" />
+                          <span className="font-mono">₹{Math.round(paid).toLocaleString('en-IN')}</span>
+                        </div>
+                        <p className="text-[9px] text-slate-400 uppercase tracking-wide mt-0.5">spent</p>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
 
+                      {/* Owed to them badge */}
+                      {totalOwed > 0.01 && (
+                        <div className="text-right">
+                          <div className="text-xs font-bold text-emerald-700 dark:text-emerald-400 font-mono">
+                            ₹{Math.round(totalOwed).toLocaleString('en-IN')}
+                          </div>
+                          <p className="text-[9px] text-emerald-600 dark:text-emerald-500 uppercase tracking-wide mt-0.5">owed to them</p>
+                        </div>
+                      )}
+
+                      {/* Expand chevron (only if they have debtors) */}
+                      {debtors.length > 0
+                        ? isExpanded
+                          ? <ChevronUp className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                          : <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                        : <div className="w-4" />
+                      }
+                    </div>
+                  </button>
+
+                  {/* Expanded debt breakdown */}
+                  {isExpanded && debtors.length > 0 && (
+                    <div className="border-t border-slate-100 dark:border-slate-800 px-4 pb-4 pt-3 bg-slate-50/50 dark:bg-slate-900/30">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                        Who still needs to pay {isMe ? 'you' : person.name}:
+                      </p>
+                      <div className="space-y-2">
+                        {debtors
+                          .sort((a, b) => b[1] - a[1])
+                          .map(([debtorId, amount]) => (
+                          <div key={debtorId}
+                            className="flex items-center justify-between p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg">
+                            <div className="flex items-center gap-2">
+                              <div className="w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-700 dark:text-slate-200 flex-shrink-0">
+                                {getInitials(getName(debtorId))}
+                              </div>
+                              <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                                {getName(debtorId)}
+                                {debtorId === currentUser.id && (
+                                  <span className="ml-1 text-[9px] bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-400 px-1 py-0.5 rounded font-bold">You</span>
+                                )}
+                              </span>
+                            </div>
+                            <span className="text-xs font-bold font-mono text-rose-600 dark:text-rose-400">
+                              ₹{Math.round(amount).toLocaleString('en-IN')}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Expanded – nothing owed message */}
+                  {isExpanded && debtors.length === 0 && (
+                    <div className="border-t border-slate-100 dark:border-slate-800 px-4 py-3 text-xs text-slate-400 bg-slate-50/50 dark:bg-slate-900/30">
+                      ✅ Everyone has settled up with {isMe ? 'you' : person.name}.
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
