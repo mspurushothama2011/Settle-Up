@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { getSupabaseClient } from '../supabaseClient';
 import { buildDirectDebts } from '../utils/settlementAlgorithm';
-import { UserPlus, User, Phone, RefreshCw, AlertCircle, Receipt, Wallet, ChevronDown, ChevronUp } from 'lucide-react';
+import { UserPlus, User, Phone, RefreshCw, AlertCircle, Wallet, ChevronDown, ChevronUp, Users, Receipt, TrendingUp } from 'lucide-react';
 
-// ---------- Component ----------
 export default function FriendManager({ currentUser, refreshTrigger }) {
   const [profiles, setProfiles] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -67,10 +66,10 @@ export default function FriendManager({ currentUser, refreshTrigger }) {
   // Build the simple direct debt table
   const { remaining, totalPaid } = buildDirectDebts(expenses, profiles);
 
-  // Total group spend (excluding payments)
-  const totalGroupSpent = expenses
-    .filter(e => !e.is_payment)
-    .reduce((s, e) => s + parseFloat(e.amount || 0), 0);
+  // Auto-calculated trip totals from all transactions
+  const totalGroupSpent  = expenses.filter(e => !e.is_payment).reduce((s, e) => s + parseFloat(e.amount || 0), 0);
+  const memberCount      = profiles.length;
+  const fairSharePerPerson = memberCount > 0 ? totalGroupSpent / memberCount : 0;
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-slate-900 dark:text-slate-100 max-w-5xl mx-auto">
@@ -122,21 +121,103 @@ export default function FriendManager({ currentUser, refreshTrigger }) {
       {/* ── Right Column ── */}
       <div className="md:col-span-2 space-y-5">
 
-        {/* Total Group Spending Banner */}
+        {/* ── Auto Trip Summary Card ── */}
         {!fetching && (
-          <div className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 p-5 rounded-xl shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest opacity-70">Total Group Spending</p>
-              <p className="text-2xl font-extrabold mt-1 font-mono">
-                ₹{Math.round(totalGroupSpent).toLocaleString('en-IN')}
-              </p>
-              <p className="text-xs mt-2 opacity-60 border-t border-white/10 dark:border-black/10 pt-2">
-                You personally paid: <span className="font-bold font-mono">₹{Math.round(totalPaid[currentUser.id] || 0).toLocaleString('en-IN')}</span>
-              </p>
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-sm overflow-hidden">
+            {/* Header */}
+            <div className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-5 py-4 flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest opacity-70">Total Trip Spending</p>
+                <p className="text-2xl font-extrabold mt-0.5 font-mono">
+                  ₹{Math.round(totalGroupSpent).toLocaleString('en-IN')}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-bold uppercase tracking-widest opacity-70">Members</p>
+                <p className="text-2xl font-extrabold mt-0.5 font-mono">{memberCount}</p>
+              </div>
             </div>
-            <div className="p-3 bg-white/10 dark:bg-black/10 rounded-lg">
-              <Receipt className="w-6 h-6" />
+
+            {/* Stats row */}
+            <div className="grid grid-cols-3 divide-x divide-slate-100 dark:divide-slate-800 border-t border-slate-100 dark:border-slate-800">
+              <div className="px-4 py-3 text-center">
+                <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Fair Share / Person</p>
+                <p className="text-sm font-extrabold font-mono text-violet-600 dark:text-violet-400">
+                  ₹{Math.round(fairSharePerPerson).toLocaleString('en-IN')}
+                </p>
+              </div>
+              <div className="px-4 py-3 text-center">
+                <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">You Paid</p>
+                <p className="text-sm font-extrabold font-mono text-slate-900 dark:text-white">
+                  ₹{Math.round(totalPaid[currentUser.id] || 0).toLocaleString('en-IN')}
+                </p>
+              </div>
+              <div className="px-4 py-3 text-center">
+                <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Transactions</p>
+                <p className="text-sm font-extrabold font-mono text-slate-900 dark:text-white">
+                  {expenses.filter(e => !e.is_payment).length}
+                </p>
+              </div>
             </div>
+
+            {/* Per-member contribution bar */}
+            {memberCount > 0 && totalGroupSpent > 0 && (
+              <div className="px-5 pb-4 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Who Paid What</p>
+                <div className="space-y-2">
+                  {profiles
+                    .map(p => ({ ...p, paid: totalPaid[p.id] || 0 }))
+                    .sort((a, b) => b.paid - a.paid)
+                    .map(p => {
+                      const pct = (p.paid / totalGroupSpent) * 100;
+                      const diff = p.paid - fairSharePerPerson;
+                      const isMe = p.id === currentUser.id;
+                      return (
+                        <div key={p.id} className="flex items-center gap-3">
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold flex-shrink-0 ${
+                            isMe ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                          }`}>
+                            {p.name.split(' ').map(w => w[0]).join('').toUpperCase().substring(0, 2)}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
+                                {p.name}{isMe && <span className="ml-1 text-[9px] bg-slate-200 dark:bg-slate-700 px-1 rounded">You</span>}
+                              </span>
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <span className="text-xs font-bold font-mono text-slate-900 dark:text-white">
+                                  ₹{Math.round(p.paid).toLocaleString('en-IN')}
+                                </span>
+                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                                  diff > 0.5
+                                    ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
+                                    : diff < -0.5
+                                    ? 'bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                                }`}>
+                                  {diff > 0.5 ? `+₹${Math.round(diff)}` : diff < -0.5 ? `-₹${Math.abs(Math.round(diff))}` : '✓'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className={`h-1.5 rounded-full transition-all duration-500 ${
+                                  isMe ? 'bg-slate-900 dark:bg-white' : 'bg-violet-400 dark:bg-violet-500'
+                                }`}
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                  })}
+                </div>
+                <p className="text-[10px] text-slate-400 mt-3 text-center">
+                  Fair share per person: <span className="font-bold text-slate-600 dark:text-slate-300">₹{Math.round(fairSharePerPerson).toLocaleString('en-IN')}</span>
+                  {' '}· +/- shows over/under contribution
+                </p>
+              </div>
+            )}
           </div>
         )}
 
